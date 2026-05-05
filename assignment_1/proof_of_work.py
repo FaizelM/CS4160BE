@@ -5,11 +5,11 @@ import argparse
 
 from pathlib import Path
 
-DIFFICULTY_BITS = 28            # num of required leading zeros
-PROGRESS_INTERVAL = 1_000_000   # print progress every x attempts
-NONCE_FILE = Path("nonce.txt")  # persist result 
-
 class POW():
+    DIFFICULTY_BITS = 28            # num of required leading zeros
+    PROGRESS_INTERVAL = 1_000_000   # print progress every x attempts
+    NONCE_FILE = Path("assignment_1", "nonce.txt")  # persist result 
+
     def __init__(self, email: str, url: str):
         self.email = email
         self.url = url
@@ -43,13 +43,13 @@ class POW():
         nonce = 0 
         t0 = time.monotonic()
 
-        print(f"[PoW] Mining with difficulty={DIFFICULTY_BITS} bits")
+        print(f"[PoW] Mining with difficulty={self.DIFFICULTY_BITS} bits")
         print(f"[PoW] Email : {self.email}")
         print(f"[PoW] URL   : {self.url}")
 
         while True:
-            # Encode nonce as signed 64-bit big-endian
-            nonce_bytes = nonce.to_bytes(8, "big", signed=True)
+            # Encode nonce as 64-bit big-endian
+            nonce_bytes = nonce.to_bytes(8, "big")
             digest = hashlib.sha256(self._prefix + nonce_bytes).digest()
 
             if self.check_difficulty(digest):
@@ -63,7 +63,7 @@ class POW():
                 return nonce
 
             nonce += 1
-            if nonce % PROGRESS_INTERVAL == 0:
+            if nonce % self.PROGRESS_INTERVAL == 0:
                 elapsed = time.monotonic() - t0
                 rate = (nonce ) / elapsed / 1_000_000
                 print(
@@ -77,13 +77,13 @@ class POW():
 
     def verify(self, nonce: int) -> bool:
         """Verify that a nonce with the current mail and url"""
-        nonce_bytes = nonce.to_bytes(8, "big", signed=True)
+        nonce_bytes = nonce.to_bytes(8, "big")
         digest = hashlib.sha256(self._prefix + nonce_bytes).digest()
         return self.check_difficulty(digest)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Lab 1 PoW miner")
+    parser = argparse.ArgumentParser(description="Lab 1 pow miner")
     parser.add_argument("--email", required=True)
     parser.add_argument("--url", required=True)
     args = parser.parse_args()
@@ -99,17 +99,17 @@ def main() -> None:
 
     pow = POW(email=email, url=url)
 
-    if NONCE_FILE.exists():
-        saved = int(NONCE_FILE.read_text().strip())
+    if pow.NONCE_FILE.exists():
+        saved = int(pow.NONCE_FILE.read_text().strip())
         if pow.verify(saved):
-            print(f"[PoW] Loaded valid nonce from {NONCE_FILE}: {saved}")
+            print(f"[PoW] Loaded valid nonce from {pow.NONCE_FILE}: {saved}")
             return
         else:
             print(f"[PoW] Saved nonce {saved} does not verify. Re-mining…")
 
     nonce = pow.mine()
-    NONCE_FILE.write_text(str(nonce))
-    print(f"[PoW] Nonce saved to {NONCE_FILE}")
+    pow.NONCE_FILE.write_text(str(nonce))
+    print(f"[PoW] Nonce saved to {pow.NONCE_FILE}")
 
 
 if __name__ == "__main__":
