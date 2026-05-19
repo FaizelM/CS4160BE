@@ -60,8 +60,8 @@ class RoundState:
     sigs_full_event: asyncio.Event = field(default_factory=asyncio.Event)
     advance_event: asyncio.Event = field(default_factory=asyncio.Event)
 
-class Lab2Community(Community):
-    def __init__(self, settings: CommunitySettings, PeerObserver) -> None:
+class Lab2Community(Community, PeerObserver):
+    def __init__(self, settings: CommunitySettings) -> None:
         self.community_id = settings.community_id
         super().__init__(settings)
 
@@ -94,6 +94,12 @@ class Lab2Community(Community):
         assert self.my_peer.key.has_secret_key()
         self._signing_key: PrivateKey = cast(PrivateKey, self.my_peer.key) 
         logger.info("Lab2Community ready | group=%s | my_index=%d", settings.group_id, settings.my_index)
+    
+    def on_peer_added(self, peer: Peer) -> None:
+        return None
+
+    def on_peer_removed(self, peer: Peer) -> None:
+        return None
 
     async def run_all_rounds(self) -> None:
         logger.info("Discovering server + teammates")
