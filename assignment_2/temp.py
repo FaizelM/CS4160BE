@@ -101,11 +101,14 @@ class Lab2Community(Community, PeerObserver):
         print("-- STARTED COMMUNITY --")
         print(f"Own mid: {self.my_peer.mid.hex()}")
         print(f"My key end: {self.my_peer.public_key.key_to_bin().hex()[-20:]}")
+        print(f"my idx: {self._my_index}")
         self.network.add_peer_observer(self)
+        self._nr_to_peer[self._my_index] = self._nr_to_member[self._my_index]
+        self.teammates_ready[self.my_peer] = self._my_index
 
     def on_peer_removed(self, peer: Peer) -> None:
         peer_pk = peer.public_key.key_to_bin().hex()
-        print(f"PEER REMOVED: {peer}, with pk:\n{peer_pk[-20:]}")
+        print(f"PEER REMOVED: {peer}, with pk: {peer_pk[-20:]}")
         return
 
     def on_peer_added(self, peer: Peer):
