@@ -14,8 +14,6 @@ from ipv8.peer import Peer
 from ipv8.keyvault.keys import PrivateKey
 from ipv8_service import IPv8
 
-from assignment_2.phase_2 import GROUP_ID
-
 class _UnsupportedCurveFilter(logging.Filter):
     """Suppress the stream of 'Curve X is not supported' errors from old peers."""
     def filter(self, record: logging.LogRecord) -> bool:
@@ -111,7 +109,7 @@ class Lab2Community(Community, PeerObserver):
     def __init__(self, settings):
         super().__init__(settings)
 
-        self._group_id = settings.group_id
+        self._group_id = None
         self._my_index = settings.my_index
         self._member_to_nr= settings.member_to_nr
         self._nr_to_member = settings.nr_to_member
@@ -163,7 +161,7 @@ class Lab2Community(Community, PeerObserver):
             print("SERVER FOUND\n")
             self.server_peer = peer
             print("REGISTERING GROUP")
-            self.ez_send(self.server_peer, RegisterPayload(self._nr_to_member[0], self._nr_to_member[1], self._nr_to_member[2]))
+            self.ez_send(self.server_peer, RegisterPayload(self._nr_to_member[0].encode(encoding="utf8"), self._nr_to_member[1].encode(encoding="utf8"), self._nr_to_member[2].encode(encoding="utf8")))
         
         if peer_pk in self._member_to_nr.keys():
             nr = self._member_to_nr[peer_pk]
@@ -172,7 +170,7 @@ class Lab2Community(Community, PeerObserver):
         
         if self.server_peer and len(self._nr_to_peer.keys()) == 3 and self._group_id:
             self.all_present = True
-            print(f"FOUND EVERYONE, and group id: {GROUP_ID}, continuing to protocol")
+            print(f"FOUND EVERYONE, and group id: {self._group_id}, continuing to protocol")
             self._broadcast_ready()
 
     @lazy_wrapper(ReadyPayload)
@@ -205,7 +203,7 @@ class Lab2Community(Community, PeerObserver):
         self._group_id = payload.group_id
         if self.server_peer and len(self._nr_to_peer.keys()) == 3 and self._group_id:
             self.all_present = True
-            print(f"FOUND EVERYONE, and groupid: {GROUP_ID}, continuing to protocol")
+            print(f"FOUND EVERYONE, and groupid: {self._group_id}, continuing to protocol")
             self._broadcast_ready()
 
 
