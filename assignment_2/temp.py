@@ -27,9 +27,13 @@ logger = logging.getLogger("Lab2Community")
 KEY_FILE = "assignment_1/key.pem"
 SERVER_PUBLIC_KEY_HEX = "4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96"
 COMMUNITY_ID_HEX = "4c61623247726f75705369676e696e6732303236"
-# GROUP_ID = "228917efcc881e76"
 
 
+PUBLIC_KEYS = [
+    b'LibNaCLPK:*Q\xc3\xf7\xaa\x87]#NS\x0cL\xa8\xba\xe4pb\xaf\x82\xdd\x1bE\xb2&\xf8\xfc\x81e\xce\xbc\x91\n8\xfcJ\x92\xd5\xccq\xc0\xdf\xd8\x85\xebr\xa1\x06,ve\xe9yQN\xeewe\x9b\x84\xaeLd\xf6V', 
+    b'LibNaCLPK:\xee\xe1\xefN\xf0\xb0&\xf4\xb7]#\x10\x9e\x16\x87\xbb\x86%%\xdeG"\xd2\x86\xb2\xb5\xf7:\x04\xee\x078n\xd8\xf8)\xbd\xbb8\x13;\xb5\xd0D\xa0\x95\x94\xb97\xdd>&\x8a\rf\x8f >\xdf\xd4.c\x0c\xa6', 
+    b'LibNaCLPK:\x08<\xceB\x06UC\x07\x99\xb7O\xb4\x1c\x1c\xa5\xa2$\xe6,T[\xd0\x1c9\x93u\xfa0\xfb/\xadw\x03\xf9\x07\x98\x9c\x04\x9be\x04,\xa5\xd1\xb5Dqi\x11a\xb6)\xcbyr\xae\xcd,\xc8?\xe0J4\xbd'
+    ]
 NR_TO_MEMBER = {
     0: "4c69624e61434c504b3a2a51c3f7aa875d234e530c4ca8bae47062af82dd1b45b226f8fc8165cebc910a38fc4a92d5cc71c0dfd885eb72a1062c7665e979514eee77659b84ae4c64f656",
     1: "4c69624e61434c504b3aeee1ef4ef0b026f4b75d23109e1687bb862525de4722d286b2b5f73a04ee07386ed8f829bdbb38133bb5d044a09594b937dd3e268a0d668f203edfd42e630ca6",
@@ -162,7 +166,7 @@ class Lab2Community(Community, PeerObserver):
             print("SERVER FOUND\n")
             self.server_peer = peer
             print("REGISTERING GROUP")
-            self.ez_send(self.server_peer, RegisterPayload(self._nr_to_member[0].encode(encoding="utf8"), self._nr_to_member[1].encode(encoding="utf8"), self._nr_to_member[2].encode(encoding="utf8")))
+            self.ez_send(self.server_peer, RegisterPayload(PUBLIC_KEYS[0], PUBLIC_KEYS[1], PUBLIC_KEYS[2]))
         
         if peer_pk in self._member_to_nr.keys():
             nr = self._member_to_nr[peer_pk]
