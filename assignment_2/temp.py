@@ -138,7 +138,9 @@ class Lab2Community(Community, PeerObserver):
         self.add_message_handler(ResponsePayload, self._on_response_payload)
         self.add_message_handler(ChallengeResponse, self._on_challenge_response)
         self.add_message_handler(ChallengeInternalResponse, self._on_internal_sig_response)
+        self.add_message_handler(ChallengeInternalNonceDist, self._on_internal_nonce_dist)
         self.add_message_handler(RoundResult, self._on_round_result)
+        self.add_message_handler(InternalStartNextRoundNotice, self._on_next_round_notice)
     
     def started(self):
         print("-- STARTED COMMUNITY --")
