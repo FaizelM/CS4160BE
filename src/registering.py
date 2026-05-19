@@ -15,8 +15,13 @@ from ipv8_service import IPv8
 
 SERVER_PUBLIC_KEY_HEX = "4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96"
 COMMUNITY_ID_HEX = "4c61623247726f75705369676e696e6732303236"
-PRIVATE_KEYS = ["mykey.pem"]
-KEY_FILE = "mykey.pem"
+PUBLIC_KEYS = [
+    b'LibNaCLPK:*Q\xc3\xf7\xaa\x87]#NS\x0cL\xa8\xba\xe4pb\xaf\x82\xdd\x1bE\xb2&\xf8\xfc\x81e\xce\xbc\x91\n8\xfcJ\x92\xd5\xccq\xc0\xdf\xd8\x85\xebr\xa1\x06,ve\xe9yQN\xeewe\x9b\x84\xaeLd\xf6V', 
+    b'LibNaCLPK:\xee\xe1\xefN\xf0\xb0&\xf4\xb7]#\x10\x9e\x16\x87\xbb\x86%%\xdeG"\xd2\x86\xb2\xb5\xf7:\x04\xee\x078n\xd8\xf8)\xbd\xbb8\x13;\xb5\xd0D\xa0\x95\x94\xb97\xdd>&\x8a\rf\x8f >\xdf\xd4.c\x0c\xa6', 
+    b'LibNaCLPK:\x08<\xceB\x06UC\x07\x99\xb7O\xb4\x1c\x1c\xa5\xa2$\xe6,T[\xd0\x1c9\x93u\xfa0\xfb/\xadw\x03\xf9\x07\x98\x9c\x04\x9be\x04,\xa5\xd1\xb5Dqi\x11a\xb6)\xcbyr\xae\xcd,\xc8?\xe0J4\xbd'
+    ]
+PRIVATE_KEYS = ["faizel.pem", "daniel.pem", "ruben.pem"]
+KEY_FILE = "faizel.pem"
 
 class _UnsupportedCurveFilter(logging.Filter):
     """Suppress the stream of 'Curve X is not supported' errors from old peers."""
@@ -46,7 +51,7 @@ def retrieve_public_keys(private_keys: List[str]) -> List[bytes]:
 class RegisterPayload(VariablePayload):
     msg_id = 1
     format_list = ["varlenH", "varlenH", "varlenH"]
-    names = ["member1_key", "member2_key", "member1_key"]
+    names = ["member1_key", "member2_key", "member3_key"]
 
 class ResponsePayload(VariablePayload):
     msg_id = 2
