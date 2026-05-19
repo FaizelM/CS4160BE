@@ -17,6 +17,15 @@ from ipv8.messaging.payload_dataclass import DataClassPayload
 from ipv8.configuration import ConfigBuilder
 from ipv8.peerdiscovery.network import PeerObserver
 
+class _UnsupportedCurveFilter(logging.Filter):
+    """Suppress the stream of 'Curve X is not supported' errors from old peers."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "Curve" not in msg and "is not supported" not in msg
+ 
+logging.getLogger("Lab2Community").addFilter(_UnsupportedCurveFilter())
+logging.basicConfig(level=logging.DEBUG)
+
 logger = logging.getLogger("Lab2")
 
 
