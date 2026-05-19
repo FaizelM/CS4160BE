@@ -21,7 +21,7 @@ PUBLIC_KEYS = [
     b'LibNaCLPK:\x08<\xceB\x06UC\x07\x99\xb7O\xb4\x1c\x1c\xa5\xa2$\xe6,T[\xd0\x1c9\x93u\xfa0\xfb/\xadw\x03\xf9\x07\x98\x9c\x04\x9be\x04,\xa5\xd1\xb5Dqi\x11a\xb6)\xcbyr\xae\xcd,\xc8?\xe0J4\xbd'
     ]
 PRIVATE_KEYS = ["faizel.pem", "daniel.pem", "ruben.pem"]
-KEY_FILE = "mykey.pem"
+KEY_FILE = "assignment_1/key.pem"
 
 class _UnsupportedCurveFilter(logging.Filter):
     """Suppress the stream of 'Curve X is not supported' errors from old peers."""

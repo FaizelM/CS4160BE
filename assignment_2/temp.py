@@ -131,6 +131,7 @@ class Lab2Community(Community, PeerObserver):
 
         # handlers
         self.add_message_handler(ReadyPayload, self._on_ready)
+        self.add_message_handler(ResponsePayload, self._on_response_payload)
         self.add_message_handler(ChallengeResponse, self._on_challenge_response)
         self.add_message_handler(ChallengeInternalResponse, self._on_internal_sig_response)
         self.add_message_handler(RoundResult, self._on_round_result)
@@ -294,7 +295,6 @@ async def main():
         default_bootstrap_defs,
         {
             "community_id": COMMUNITY_ID_HEX,
-            # "group_id": GROUP_ID,
             "nr_to_member": NR_TO_MEMBER,
             "member_to_nr": MEMBER_TO_NR,
             "my_index": 2,
