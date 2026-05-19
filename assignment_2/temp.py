@@ -1,8 +1,6 @@
 import asyncio
 import logging
 
-from tkinter import W
-from typing import List
 from pathlib import Path
  
 from ipv8.keyvault.crypto import ECCrypto
@@ -155,7 +153,7 @@ class Lab2Community(Community, PeerObserver):
 
     def _broadcast_ready(self) -> None:
         payload = ReadyPayload(group_id=self._group_id)
-        for peer, _ in self.teammates_ready.values():
+        for peer in self.teammates_ready.values():
             self.ez_send(peer, payload)
 
         logger.debug("ReadyPayload broadcast to %d teammate(s).", len(self.teammates_ready.keys()))
@@ -181,7 +179,7 @@ async def main():
             "group_id": GROUP_ID,
             "nr_to_member": NR_TO_MEMBER,
             "member_to_nr": MEMBER_TO_NR,
-            "my_index": 0,
+            "my_index": 2,
             "server_pk": SERVER_PUBLIC_KEY_HEX 
         },
         [("started",)],
