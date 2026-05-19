@@ -12,8 +12,6 @@ from ipv8.messaging.lazy_payload import VariablePayload, vp_compile
 from ipv8.peer import Peer
 from ipv8_service import IPv8
 
-from assignment_2.phase_2_community import ChallengeRequestPayload, ChallengeResponsePayload
-
 class _UnsupportedCurveFilter(logging.Filter):
     """Suppress the stream of 'Curve X is not supported' errors from old peers."""
     def filter(self, record: logging.LogRecord) -> bool:
@@ -42,13 +40,13 @@ MEMBER_TO_NR = {
 }
 
 @vp_compile
-class ChallangeRequest(VariablePayload):
+class ChallengeRequest(VariablePayload):
     msg_id=3
     format_list = ["varlenHutf8"]
     names = ["group_id"]
 
 @vp_compile
-class ChallangeResponse(VariablePayload):
+class ChallengeResponse(VariablePayload):
     msg_id=4
     format_list = ["varlenH", "q", "d" ]
     names = ["nonce", "round_number", "deadline"]
@@ -118,7 +116,7 @@ class Lab2Community(Community, PeerObserver):
 
         # handlers
         self.add_message_handler(ReadyPayload, self._on_ready)
-        self.add_message_handler(ChallangeRequest, self._on_challenge_response)
+        self.add_message_handler(ChallengeRequest, self._on_challenge_response)
         self.add_message_handler(ChallengeInternalResponse, self._on_internal_sig_response)
         self.add_message_handler(RoundResult, self._on_round_result)
     
@@ -192,10 +190,10 @@ class Lab2Community(Community, PeerObserver):
     def _start_challenge_rounds(self):
         print(f"Sending Challenge of round: {self._my_index} to server")
         assert self.server_peer, "self.server_peer was NONE"
-        self.ez_send(self.server_peer, ChallengeRequestPayload(self._group_id))
+        self.ez_send(self.server_peer, ChallengeRequest(self._group_id))
 
-    @lazy_wrapper(ChallengeResponsePayload)
-    def _on_challenge_response(self, peer: Peer, payload: ChallengeResponsePayload) -> None:
+    @lazy_wrapper(ChallengeResponse)
+    def _on_challenge_response(self, peer: Peer, payload: ChallengeResponse) -> None:
         if not peer is self.server_peer:
             print(f"GOT CHALLENGE RESPONSE FROM NON SERVER.\npeer: {peer},\npayload:{payload}\n")
             return
