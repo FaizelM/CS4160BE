@@ -29,27 +29,32 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("Lab2")
 
 
+@dataclass
 class ChallengeRequestPayload(DataClassPayload[3]):
     group_id: str
 
+@dataclass
 class ChallengeResponsePayload(DataClassPayload[4]):
     nonce: bytes
     round_number: int
     deadline: float
 
+@dataclass
 class SignatureBundlePayload(DataClassPayload[5]):
     group_id: str
     round_number: int
     sig1: bytes        # Same number of signatures as submitted in part 1
-    sig2: bytes        # In the same order every round. 
-    sig3: bytes        
+    sig2: bytes        # In the same order every round.
+    sig3: bytes
 
+@dataclass
 class RoundResultPayload(DataClassPayload[6]):
     success: bool
     round_number: int
     rounds_completed: int
     message: str
 
+@dataclass
 class NonceSigPayload(DataClassPayload[91]):
     """Peer broadcasts nonce + own signature for a round."""
     group_id: str
@@ -57,6 +62,7 @@ class NonceSigPayload(DataClassPayload[91]):
     nonce: bytes
     signature: bytes
 
+@dataclass
 class ReadyPayload(DataClassPayload[93]):
     """Ready msg, to share we are ready to start the challenges. Only share when the cache is full."""
     group_id: str
