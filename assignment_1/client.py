@@ -37,8 +37,8 @@ def _require_env(key: str) -> str:
         sys.exit(f"ERROR: {key!r} is not set in .env")
     return value
 
-COMMUNITY_ID = bytes.fromhex(_require_env("COMMUNITY_ID"))
-SERVER_PUBLIC_KEY = bytes.fromhex(_require_env("SERVER_PUBLIC_KEY"))
+COMMUNITY_ID = bytes.fromhex(_require_env("COMMUNITY_ID_ASS1"))
+SERVER_PUBLIC_KEY = bytes.fromhex(_require_env("SERVER_PUBLIC_KEY_ASS1"))
 
 KEY_FILE = Path("assignment_1", "key.pem")
 DISCOVERY_TIMEOUT = 300.0   
