@@ -300,7 +300,7 @@ async def main():
             "community_id": COMMUNITY_ID_HEX,
             "nr_to_member": NR_TO_MEMBER,
             "member_to_nr": MEMBER_TO_NR,
-            "my_index": 2,
+            "my_index": 0,
             "server_pk": SERVER_PUBLIC_KEY_HEX 
         },
         [("started",)],
