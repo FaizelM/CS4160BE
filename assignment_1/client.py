@@ -1,187 +1,196 @@
-import os
-import sys
-import logging
 import asyncio
-import argparse
-
-from proof_of_work import POW
-
-from dataclasses import dataclass
+import hashlib
+import logging
+import struct
 from pathlib import Path
-from dotenv import load_dotenv
-
-from ipv8.community import Community, CommunitySettings
-from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs, BootstrapperDefinition, Bootstrapper
+ 
+from ipv8.community import Community
+from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs
 from ipv8.lazy_community import lazy_wrapper
-from ipv8.messaging.payload_dataclass import DataClassPayload
-from ipv8.messaging.lazy_payload import vp_compile
+from ipv8.messaging.lazy_payload import VariablePayload
 from ipv8.peer import Peer
 from ipv8_service import IPv8
-from ipv8.peerdiscovery.network import PeerObserver
-from ipv8.util import run_forever
-
+ 
 class _UnsupportedCurveFilter(logging.Filter):
-    """Prevent the stream of not supported curve errors"""
+    """Suppress the stream of 'Curve X is not supported' errors from old peers."""
     def filter(self, record: logging.LogRecord) -> bool:
-        return "Curve" not in record.getMessage() and "is not supported" not in record.getMessage()
+        msg = record.getMessage()
+        return "Curve" not in msg and "is not supported" not in msg
  
 logging.getLogger("Lab1Community").addFilter(_UnsupportedCurveFilter())
 logging.basicConfig(level=logging.DEBUG)
+ 
+SERVER_PUBLIC_KEY_HEX = "4c69624e61434c504b3a86b23934a28d669c390e2d1fc0b0870706c4591cc0cb178bc5a811da6d87d27ef319b2638ef60cc8d119724f4c53a1ebfad919c3ac4136c501ce5c09364e0ebb"
+COMMUNITY_ID_HEX = "2c1cc6e35ff484f99ebdfb6108477783c0102881"
+KEY_FILE = "mykey.pem"
+EMAIL = "F.Mangroe@student.tudelft.nl"
+GITHUB_URL = "https://github.com/FaizelM/CS4160BE.git"
+PREFIX = (EMAIL.encode("utf-8") + b"\n" + GITHUB_URL.encode("utf-8") + b"\n")
 
+def valid(hash_bytes: bytes) -> bool:
+    return hash_bytes[0] == 0 and hash_bytes[1] == 0 and hash_bytes[2] == 0 and hash_bytes[3] < 16
 
-load_dotenv()
-def _require_env(key: str) -> str:
-    """Read a required environment variable; exit with a clear error if missing."""
-    value = os.getenv(key)
-    if not value:
-        sys.exit(f"ERROR: {key!r} is not set in .env")
-    return value
+def mine_for_nonce() -> int:
+    nonce = 0
 
-COMMUNITY_ID = bytes.fromhex(_require_env("COMMUNITY_ID_ASS1"))
-SERVER_PUBLIC_KEY = bytes.fromhex(_require_env("SERVER_PUBLIC_KEY_ASS1"))
-
-KEY_FILE = Path("assignment_1", "key.pem")
-DISCOVERY_TIMEOUT = 300.0   
-RESPONSE_TIMEOUT  = 120.0    
-
-@dataclass
-class SubmissionPayload(DataClassPayload[1]):
-    email: str
-    github_url: str
-    nonce: int
-
-@vp_compile
-@dataclass
-class ResponsePayload(DataClassPayload[2]):
-    success: bool 
-    message: str
-
-    names = ["success", "message"]
-    format_list = ["?", "varlenHutf8"]
-
-class Lab1Community(Community, PeerObserver):
-    community_id = COMMUNITY_ID
-    server_public_key = SERVER_PUBLIC_KEY
-
-    def __init__(self, settings: CommunitySettings) -> None:
-        super().__init__(settings)
-        self.add_message_handler(ResponsePayload, self.on_response)
-        self.add_message_handler(SubmissionPayload, self.on_submission)
-
-        self._email: str = settings.email 
-        self._github_url: str = settings.github_url
-        self._nonce: int = settings.nonce 
-
-    def on_started(self) -> None:
-        print("[Community] started")
-        self.network.add_peer_observer(self)
-
-    def _is_server(self, peer: Peer) -> bool:
-        return peer.public_key.key_to_bin() == self.server_public_key 
-    
-    def on_peer_added(self, peer: Peer) -> None:
-        if not self._is_server(peer):
-            print(f"[Community] peer is not server: {peer}")
-            return
-
-        print(f"[Community] Server found: {peer}", flush=True)
-        assert self._nonce is not None
-        assert self._email is not None
-        assert self._github_url is not None
-
-        print(f"[Community] Sending submission email={self._email}, github_url={self._github_url}, nonce={self._nonce}")
-        payload = SubmissionPayload(email=self._email, github_url=self._github_url, nonce=self._nonce)
-        self.ez_send(peer, payload)
-
-    def on_peer_removed(self, peer: Peer) -> None:
-        if self._is_server(peer):
-            print("[Community] Server disconnected")
-        else:
-            print("[Coummunity] Peer disconnected")
-
-    @lazy_wrapper(ResponsePayload)
-    def on_response(self, peer: Peer, payload: ResponsePayload) -> None:
-        if not self._is_server(peer):
-            print(f"[Community] Ignoring response from peer (not server): {peer}, payload:\n{payload}")
-            return
-
-        status = "ACCEPTED" if payload.success else "REJECTED"
-        print(f"\n[Community] Server response: {status}")
-        print(f"[Community] Message:\n{payload}\n")
-        if payload.success:
-            exit(0)
-        else:
-            exit(1)
-
-    @lazy_wrapper(SubmissionPayload)
-    def on_submission(self, peer: Peer, payload: SubmissionPayload) -> None:
-        print(f"[Community] ignoring submission from peer {peer}, payload was:\n{payload}")
-
-def get_nonce(email: str, github_url: str) -> int:
-    pow_solver = POW(email=email, url=github_url)
-
-    if pow_solver.NONCE_FILE.exists():
-        candidate = int(pow_solver.NONCE_FILE.read_text().strip())
-        if pow_solver.verify(candidate):
-            print(f"[Client] Loaded valid nonce from {pow_solver.NONCE_FILE}: {candidate}")
-            return candidate
-        print(f"[Client] Cached nonce {candidate} is invalid. Re-mining")
-
-    print("[Client] Starting PoW mining")
-    nonce = pow_solver.mine()
-    pow_solver.NONCE_FILE.write_text(str(nonce))
-    print(f"[Client] Nonce persisted to {pow_solver.NONCE_FILE}")
+    while True:
+        nonce_bytes = struct.pack(">Q", nonce)
+        digest = hashlib.sha256(PREFIX + nonce_bytes).digest()
+        if valid(digest):
+            print("Solution found")
+            print(f"Nonce: {nonce}")
+            print(f"Hash: {digest.hex()}")
+            break
+        if nonce % 100 == 0:
+            print("iteration: ", nonce)
+        nonce += 1
     return nonce
 
+def verify(email: str, github_url: str, nonce: int) -> bool:
+    payload = (email.encode("utf-8") + b"\n" + github_url.encode("utf-8") + b"\n" + struct.pack(">Q", nonce))
+    digest = hashlib.sha256(payload).digest()
+    return digest[0] == 0 and digest[1] == 0 and digest[2] == 0 and digest[3] < 16
+ 
+# ============================================================
+# PAYLOADS
+# ============================================================
+ 
+class SubmissionPayload(VariablePayload):
+    msg_id = 1
+    format_list = ["varlenHutf8", "varlenHutf8", "q"]
+    names = ["email", "github_url", "nonce"]
+ 
+ 
+class ResponsePayload(VariablePayload):
+    msg_id = 2
+    format_list = ["?", "varlenHutf8"]
+    names = ["success", "message"]
 
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Lab 1 IPv8 client")
-    parser.add_argument("--email", required=False)
-    parser.add_argument("--url",   required=False)
-    return parser.parse_args()
-
+class Lab1Community(Community):
+    community_id = bytes.fromhex(COMMUNITY_ID_HEX)
+ 
+    def __init__(self, settings):
+        super().__init__(settings)
+        self.server_peer = None
+        self.submitted = False
+        self.add_message_handler(ResponsePayload, self.on_response)
+        self.register_task("status", self._log_status, interval=10.0, delay=10.0)
+ 
+    def _log_status(self):
+        peers = self.get_peers()
+        print(f"[status] {len(peers)} peer(s) in community, server_peer={self.server_peer is not None}")
+ 
+        if self.submitted or self.server_peer is not None:
+            return
+ 
+        for peer in peers:
+            try:
+                if peer.public_key.key_to_bin() == bytes.fromhex(SERVER_PUBLIC_KEY_HEX):
+                    print("Server peer found!")
+                    self.server_peer = peer
+                    asyncio.ensure_future(self.submit())
+                    return
+            except Exception:
+                continue
+ 
+    def peer_added(self, peer: Peer) -> None:
+        print(f"peer_added() called for: {peer}")
+        try:
+            key = peer.public_key.key_to_bin()
+        except Exception as e:
+            print(f"  Could not read key: {e}")
+            return
+ 
+        print(f"  Key: {key.hex()[:20]}...")
+        if key == bytes.fromhex(SERVER_PUBLIC_KEY_HEX):
+            print("  -> Server peer discovered!")
+            self.server_peer = peer
+            asyncio.ensure_future(self.submit())
+        else:
+            print(f"  -> Non-server peer, skipping.")
+ 
+    def peer_removed(self, peer: Peer) -> None:
+        try:
+            key = peer.public_key.key_to_bin()
+        except Exception:
+            return
+ 
+        if key == bytes.fromhex(SERVER_PUBLIC_KEY_HEX):
+            print("WARNING: Server peer disconnected.")
+            self.server_peer = None
+ 
+    async def submit(self):
+        if self.submitted:
+            return
+        self.submitted = True
+ 
+        nonce = mine_for_nonce()
+ 
+        assert verify(EMAIL, GITHUB_URL, nonce), "BUG: mined nonce does not satisfy difficulty!"
+        print(f"\nPoW verified locally. Sending submission...\n")
+ 
+        self.ez_send(self.server_peer, SubmissionPayload(EMAIL, GITHUB_URL, nonce))
+ 
+    @lazy_wrapper(ResponsePayload)
+    async def on_response(self, peer: Peer, payload: ResponsePayload):
+        expected_key = bytes.fromhex(SERVER_PUBLIC_KEY_HEX)
+        try:
+            sender_key = peer.public_key.key_to_bin()
+        except Exception:
+            print("WARNING: Could not read public key from response sender — ignoring.")
+            return
+ 
+        if sender_key != expected_key:
+            print("WARNING: Ignoring response from non-server peer.")
+            return
+ 
+        print("\n==============================")
+        print("SERVER RESPONSE")
+        print("==============================")
+        print(f"Success: {payload.success}")
+        print(f"Message: {payload.message}")
+        print("==============================\n")
+ 
+        asyncio.get_event_loop().stop()
+ 
+ 
+# ============================================================
+# MAIN
+# ============================================================
+ 
 async def main():
-    args = _parse_args()
-
-    email = (args.email or os.getenv("EMAIL") or "").strip()
-    github_url  = (args.url or os.getenv("URL") or "").strip()
-
-    if not email:
-        sys.exit("ERROR: No email provided")
-    if not github_url:
-        sys.exit("ERROR: No URL provided via --url or URL env var")
-
-    # Verify im not stupid
-    if not (email.endswith("@tudelft.nl") or email.endswith("@student.tudelft.nl")):
-        sys.exit(f"ERROR: email must end with @tudelft.nl or @student.tudelft.nl, got: {email!r}")
-    if not github_url or any(c <= " " for c in github_url):
-        sys.exit("ERROR: URL must be non-empty and contain no whitespace/control characters")
-
-    # Handle ipv8
-    nonce = get_nonce(email=email, github_url=github_url)
-    config = (
-        ConfigBuilder()
-        .clear_keys()
-        .add_key("my peer", "curve25519", str(KEY_FILE))
-        .clear_overlays()
-        .add_overlay(
-            "Lab1Community",
-            "my peer",
-            [WalkerDefinition(Strategy.RandomWalk, 20, {"timeout": 3.0})],
-            default_bootstrap_defs + [BootstrapperDefinition(Bootstrapper.UDPBroadcastBootstrapper, {})],
-            {
-                "email": email,
-                "github_url": github_url,
-                "nonce": nonce,
-            },
-            [("on_started",)],
-        )
-        .finalize()
+    key_path = Path(KEY_FILE)
+ 
+    builder = ConfigBuilder()
+    builder.clear_keys()
+    builder.clear_overlays()
+ 
+    builder.add_key("my peer", "curve25519", str(key_path))
+ 
+    builder.add_overlay(
+        "Lab1Community",
+        "my peer",
+        [WalkerDefinition(Strategy.RandomWalk, 20, {"timeout": 5.0})],
+        default_bootstrap_defs,
+        {},
+        [],
+        -1,
     )
-
-    ipv8 = IPv8(config, extra_communities={"Lab1Community": Lab1Community})
+ 
+    ipv8 = IPv8(
+        builder.finalize(),
+        extra_communities={"Lab1Community": Lab1Community},
+    )
+ 
     await ipv8.start()
-    await run_forever()
-
+    print("IPv8 started, waiting for server peer...\n")
+ 
+    try:
+        while True:
+            await asyncio.sleep(1)
+    finally:
+        await ipv8.stop()
+ 
+ 
 if __name__ == "__main__":
     asyncio.run(main())
