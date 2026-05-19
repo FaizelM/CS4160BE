@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from typing import cast
 from pathlib import Path
  
 from ipv8.keyvault.crypto import ECCrypto
@@ -10,7 +11,10 @@ from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, defaul
 from ipv8.lazy_community import lazy_wrapper
 from ipv8.messaging.lazy_payload import VariablePayload, vp_compile
 from ipv8.peer import Peer
+from ipv8.keyvault.keys import PrivateKey
 from ipv8_service import IPv8
+
+from assignment_2.phase_2 import GROUP_ID
 
 class _UnsupportedCurveFilter(logging.Filter):
     """Suppress the stream of 'Curve X is not supported' errors from old peers."""
@@ -25,7 +29,7 @@ logger = logging.getLogger("Lab2Community")
 KEY_FILE = "assignment_1/key.pem"
 SERVER_PUBLIC_KEY_HEX = "4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96"
 COMMUNITY_ID_HEX = "4c61623247726f75705369676e696e6732303236"
-GROUP_ID = "5c0303d6e952c77d"
+# GROUP_ID = "228917efcc881e76"
 
 
 NR_TO_MEMBER = {
@@ -122,13 +126,14 @@ class Lab2Community(Community, PeerObserver):
         # ready handshake
         self.teammates_ready = {}
         self.all_ready = False
+        self._groups_updated_team_ready = {}
 
         # my round
         self._signed_nonces = {}
 
         # handlers
         self.add_message_handler(ReadyPayload, self._on_ready)
-        self.add_message_handler(ChallengeRequest, self._on_challenge_response)
+        self.add_message_handler(ChallengeResponse, self._on_challenge_response)
         self.add_message_handler(ChallengeInternalResponse, self._on_internal_sig_response)
         self.add_message_handler(RoundResult, self._on_round_result)
     
@@ -140,6 +145,7 @@ class Lab2Community(Community, PeerObserver):
         self.network.add_peer_observer(self)
         self._nr_to_peer[self._my_index] = self.my_peer
         self.teammates_ready[self.my_peer] = self._my_index
+        self.sk: PrivateKey = cast(PrivateKey, self.my_peer.key) 
 
     def on_peer_removed(self, peer: Peer) -> None:
         peer_pk = peer.public_key.key_to_bin().hex()
@@ -156,15 +162,17 @@ class Lab2Community(Community, PeerObserver):
         if is_server(peer):
             print("SERVER FOUND\n")
             self.server_peer = peer
+            print("REGISTERING GROUP")
+            self.ez_send(self.server_peer, RegisterPayload(self._nr_to_member[0], self._nr_to_member[1], self._nr_to_member[2]))
         
         if peer_pk in self._member_to_nr.keys():
             nr = self._member_to_nr[peer_pk]
             print(f"Found group mate: {nr}\n")
             self._nr_to_peer[nr] = peer
         
-        if self.server_peer and len(self._nr_to_peer.keys()) == 3:
+        if self.server_peer and len(self._nr_to_peer.keys()) == 3 and self._group_id:
             self.all_present = True
-            print("FOUND EVERYONE, continuing to protocol")
+            print(f"FOUND EVERYONE, and group id: {GROUP_ID}, continuing to protocol")
             self._broadcast_ready()
 
     @lazy_wrapper(ReadyPayload)
@@ -188,19 +196,17 @@ class Lab2Community(Community, PeerObserver):
         if len(self.teammates_ready.keys()) == 3:
             print("EVERYONE READY, nr 1 will start challenge")
             if self._my_index == 0:
-                print("I WILL REGISTER TO THE SERVER")
-                assert self.server_peer, "PEER SERVER WAS NONE"
-                self.ez_send(self.server_peer, RegisterPayload(self._nr_to_member[0], self._nr_to_member[1], self._nr_to_member[2]))
+                self._start_challenge_rounds()
 
 
     @lazy_wrapper(ResponsePayload)
     def _on_response_payload(self, peer: Peer, payload: ResponsePayload) -> None:
         print(f"RECEIVED REGISTRATION RESPONSE FROM THE SERVER: {peer},\npayload: {payload}")
-        if payload.success:
-            print("I WILL START CHALLENGING THE SERVER")
-            self._start_challenge_rounds()
-        else:
-            print("REGISTRATION FAILED")
+        self._group_id = payload.group_id
+        if self.server_peer and len(self._nr_to_peer.keys()) == 3 and self._group_id:
+            self.all_present = True
+            print(f"FOUND EVERYONE, and groupid: {GROUP_ID}, continuing to protocol")
+            self._broadcast_ready()
 
 
     def _broadcast_ready(self) -> None:
@@ -208,7 +214,7 @@ class Lab2Community(Community, PeerObserver):
         for peer in self._nr_to_peer.values():
             self.ez_send(peer, payload)
 
-        logger.debug("ReadyPayload broadcast to %d teammate(s). teammates: ", len(self.teammates_ready.keys()), self.teammates_ready.values())
+        print("ReadyPayload broadcast to %d teammate(s). teammates: ", len(self.teammates_ready.keys()), self.teammates_ready.values())
     
     def _start_challenge_rounds(self):
         print(f"Sending Challenge of round: {self._my_index} to server")
@@ -222,7 +228,7 @@ class Lab2Community(Community, PeerObserver):
             return
         
         nonce = payload.nonce
-        for nr, peer in self._nr_to_peer:
+        for nr, peer in self._nr_to_peer.items():
             if nr == self._my_index:
                 continue
             
@@ -290,7 +296,7 @@ async def main():
         default_bootstrap_defs,
         {
             "community_id": COMMUNITY_ID_HEX,
-            "group_id": GROUP_ID,
+            # "group_id": GROUP_ID,
             "nr_to_member": NR_TO_MEMBER,
             "member_to_nr": MEMBER_TO_NR,
             "my_index": 2,
