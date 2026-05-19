@@ -11,10 +11,11 @@ from ipv8.peer import Peer
 from ipv8.community import Community, CommunitySettings
 from ipv8.keyvault.keys import PrivateKey
 from ipv8.lazy_community import lazy_wrapper
-from ipv8.peerdiscovery.network import Network
 from ipv8.messaging.payload_dataclass import DataClassPayload
 
 logger = logging.getLogger("Lab2")
+
+
 class ChallengeRequestPayload(DataClassPayload[3]):
     group_id: str
 
@@ -26,7 +27,7 @@ class ChallengeResponsePayload(DataClassPayload[4]):
 class SignatureBundlePayload(DataClassPayload[5]):
     group_id: str
     round_number: int
-    sig1: bytes        # Same number signatures as submitted in part 1 
+    sig1: bytes        # Same number of signatures as submitted in part 1
     sig2: bytes        # In the same order every round. 
     sig3: bytes        
 
@@ -36,32 +37,28 @@ class RoundResultPayload(DataClassPayload[6]):
     rounds_completed: int
     message: str
 
-
-
-class NonceBroadcastPayload(DataClassPayload[91]):
-    """Peer sharing the nonce for the current round number"""
+class NonceSigPayload(DataClassPayload[91]):
+    """Peer broadcasts nonce + own signature for a round."""
     group_id: str
     round_number: int
     nonce: bytes
-
-class SignatureSharePayload(DataClassPayload[92]):
-    """Peer responding with signed nonce for the round"""
-    group_id: str
-    round_number: int
     signature: bytes
 
 class ReadyPayload(DataClassPayload[93]):
     """Ready msg, to share we are ready to start the challenges. Only share when the cache is full."""
     group_id: str
 
+
 @dataclass
 class RoundState:
     round_number: int
     nonce: Optional[bytes] = None
     deadline: Optional[float] = None
-    nonce_future: Optional[asyncio.Future] = None
-    sig_futures: Dict[int, asyncio.Future] = field(default_factory=dict)
-    result_future: Optional[asyncio.Future] = None
+    sig_cache: Dict[int, bytes] = field(default_factory=dict)
+    nonce_event: asyncio.Event = field(default_factory=asyncio.Event)
+    sigs_full_event: asyncio.Event = field(default_factory=asyncio.Event)
+    advance_event: asyncio.Event = field(default_factory=asyncio.Event)
+
 
 @dataclass
 class Lab2Settings(CommunitySettings):
@@ -71,8 +68,6 @@ class Lab2Settings(CommunitySettings):
     my_index: int = 0
 
 class Lab2Community(Community):
-    ROUND_TO_SUBMITTER: Dict[int, int] = {1: 0, 2: 1, 3: 2}
-
     def __init__(self, settings: Lab2Settings) -> None:
         self.community_id = settings.community_id
         super().__init__(settings)
@@ -83,8 +78,11 @@ class Lab2Community(Community):
         self._server_pk = settings.server_pk
         self._sk = None
 
-        self._round_states: Dict[int, RoundState] = {}
-        self._all_done = asyncio.Event()
+        self._round_states: Dict[int, RoundState] = {
+            rn: RoundState(round_number=rn) for rn in (1, 2, 3)
+        }
+        self._current_round: int = 1
+        self._has_won: bool = False
 
         # Cache the peer objects of our server and the peers, so we don't need to search for them again
         self._server_peer: Optional[Peer] = None
@@ -96,85 +94,112 @@ class Lab2Community(Community):
 
         self.add_message_handler(ChallengeResponsePayload, self._on_challenge_response)
         self.add_message_handler(RoundResultPayload, self._on_round_result)
-        self.add_message_handler(NonceBroadcastPayload, self._on_nonce_broadcast)
-        self.add_message_handler(SignatureSharePayload, self._on_signature_share)
+        self.add_message_handler(NonceSigPayload, self._on_nonce_sig)
         self.add_message_handler(ReadyPayload, self._on_ready)
 
-        # Make sure we have a private key associated to the public key
+        # Make sure we have a private key associated with the public key
         assert self.my_peer.key.has_secret_key()
         self._signing_key: PrivateKey = cast(PrivateKey, self.my_peer.key) 
         logger.info("Lab2Community ready | group=%s | my_index=%d", settings.group_id, settings.my_index)
 
     async def run_all_rounds(self) -> None:
-        loop = asyncio.get_event_loop()
-        for rn in (1, 2, 3):
-            state = RoundState(round_number=rn)
-            state.nonce_future  = loop.create_future()
-            state.result_future = loop.create_future()
-
-            # We only need to collect signatures in the round we are submitter
-            if self.ROUND_TO_SUBMITTER[rn] == self._my_index:
-                for idx in self._teammate_indices():
-                    state.sig_futures[idx] = loop.create_future()
-
-            self._round_states[rn] = state
-
-        logger.info("Waiting for all peers to be discovered")
+        logger.info("Discovering server + teammates")
         await self._discover_all_peers()
 
-        logger.info("Broadcasting ready, waiting for teammates")
+        logger.info("Ready handshake")
         await self._readiness_handshake()
 
-        logger.info("All 3 members ready — starting rounds.")
-        if self.ROUND_TO_SUBMITTER[1] == self._my_index:
-            asyncio.create_task(self._run_round_as_submitter(1))
+        logger.info("All 3 members ready — starting rounds")
+        t0 = time.time()
+        for rn in (1, 2, 3):
+            await self._do_round(rn)
+            self._advance_to(rn + 1)
 
-        await self._all_done.wait()
-        logger.info("All 3 rounds completed.")
+        logger.info("Rounds done in %.2fs | has_won=%s", time.time() - t0, self._has_won)
 
+    async def _do_round(self, rn: int) -> None:
+        state = self._round_states[rn]
+        logger.info("[Round %d] start (current=%d, won=%s)", rn, self._current_round, self._has_won)
 
-    async def _run_round_as_submitter(self, round_num: int) -> None:
-        logger.info("[Round %d] Starting our submitter round.", round_num)
-        state = self._round_states[round_num]
-
-        if not state.nonce_future.done():  # type: ignore
-            self.ez_send(self._server_peer, ChallengeRequestPayload(group_id=self._group_id)) # type: ignore
+        # Every node hits the server in parallel; the server returns the same nonce during a live round.
+        if state.nonce is None and self._server_peer is not None:
+            self.ez_send(self._server_peer, ChallengeRequestPayload(group_id=self._group_id))
 
         try:
-            nonce = await asyncio.wait_for(asyncio.shield(state.nonce_future), timeout=5.0) # type: ignore
+            await asyncio.wait_for(state.nonce_event.wait(), timeout=3.0)
         except asyncio.TimeoutError:
-            logger.error("[Round %d] No ChallengeResponse within timeout.", round_num)
+            logger.error("[Round %d] no nonce received", rn)
             return
 
-        self._broadcast_nonce(round_num, nonce)
-        my_sig = self.crypto.create_signature(self._signing_key, nonce)
+        self._sign_and_broadcast(state)
 
-        logger.info("[Round %d] Waiting for teammate signatures", round_num)
+        sigs_task = asyncio.create_task(state.sigs_full_event.wait())
+        adv_task = asyncio.create_task(state.advance_event.wait())
         try:
-            teammate_sigs = await asyncio.wait_for(
-                asyncio.gather(*[state.sig_futures[i] for i in self._teammate_indices()]),
-                timeout= 1.0,  
+            _, pending = await asyncio.wait(
+                {sigs_task, adv_task},
+                timeout=3.0,
+                return_when=asyncio.FIRST_COMPLETED,
             )
-        except asyncio.TimeoutError:
-            logger.error("[Round %d] Timed out waiting for teammate signatures.", round_num)
+            for t in pending:
+                t.cancel()
+        except Exception:
+            sigs_task.cancel()
+            adv_task.cancel()
+
+        if state.advance_event.is_set():
+            logger.info("[Round %d] peer advanced round, skip submit", rn)
+            return
+        if self._has_won:
+            logger.info("[Round %d] already won earlier, skip submit", rn)
+            return
+        if not state.sigs_full_event.is_set():
+            logger.warning("[Round %d] only %d/3 sigs, skipping submit", rn, len(state.sig_cache))
             return
 
-        sigs: List[Optional[bytes]] = [None, None, None]
-        sigs[self._my_index] = my_sig
-        for i, idx in enumerate(self._teammate_indices()):
-            sigs[idx] = teammate_sigs[i]
+        sigs = [state.sig_cache[i] for i in (0, 1, 2)]
+        logger.info("[Round %d] submitting bundle", rn)
+        self.ez_send(self._server_peer, SignatureBundlePayload(  # type: ignore
+            group_id=self._group_id,
+            round_number=rn,
+            sig1=sigs[0], sig2=sigs[1], sig3=sigs[2],
+        ))
 
-        self.ez_send(
-            self._server_peer, # type: ignore
-            SignatureBundlePayload(
-                group_id=self._group_id,
-                round_number=round_num,
-                sig1=sigs[0],
-                sig2=sigs[1],
-                sig3=sigs[2],
-            ),
+        try:
+            await asyncio.wait_for(state.advance_event.wait(), timeout=1.5)
+        except asyncio.TimeoutError:
+            pass
+
+    def _sign_and_broadcast(self, state: RoundState) -> None:
+        if state.nonce is None or self._my_index in state.sig_cache:
+            return
+        sig = self.crypto.create_signature(self._signing_key, state.nonce)
+        state.sig_cache[self._my_index] = sig
+        self._broadcast_nonce_sig(state.round_number, state.nonce, sig)
+        self._maybe_set_sigs_full(state)
+
+    def _maybe_set_sigs_full(self, state: RoundState) -> None:
+        if len(state.sig_cache) >= 3 and not state.sigs_full_event.is_set():
+            state.sigs_full_event.set()
+
+    def _advance_to(self, new_rn: int) -> None:
+        if new_rn <= self._current_round:
+            return
+        for rn in range(self._current_round, new_rn):
+            st = self._round_states.get(rn)
+            if st is not None and not st.advance_event.is_set():
+                st.advance_event.set()
+        self._current_round = new_rn
+
+    def _broadcast_nonce_sig(self, rn: int, nonce: bytes, sig: bytes) -> None:
+        payload = NonceSigPayload(
+            group_id=self._group_id,
+            round_number=rn,
+            nonce=nonce,
+            signature=sig,
         )
-        logger.info("[Round %d] Bundle submitted.", round_num)
+        for peer in self._teammate_peers.values():
+            self.ez_send(peer, payload)
 
     @lazy_wrapper(ChallengeResponsePayload)
     def _on_challenge_response(self, peer: Peer, payload: ChallengeResponsePayload) -> None:
@@ -186,22 +211,61 @@ class Lab2Community(Community):
             logger.warning("[Round %d] No state for incoming ChallengeResponse, ignoring. ", rn, payload)
             return
 
-        state.nonce    = payload.nonce
-        state.deadline = payload.deadline
-        if state.nonce_future and not state.nonce_future.done():
-            state.nonce_future.set_result(payload.nonce)
+        if rn > self._current_round:
+            self._advance_to(rn)
+
+        if state.nonce is None:
+            state.nonce = payload.nonce
+            state.deadline = payload.deadline
+            state.nonce_event.set()
+            logger.info("[Round %d] nonce from server (deadline in %.2fs)",
+                        rn, payload.deadline - time.time())
+            # Relay immediately — peers may not have heard server yet.
+            self._sign_and_broadcast(state)
+
+    @lazy_wrapper(NonceSigPayload)
+    def _on_nonce_sig(self, peer: Peer, payload: NonceSigPayload) -> None:
+        sender_key = peer.public_key.key_to_bin()
+        if sender_key not in self._member_keys:
+            return
+        if payload.group_id != self._group_id:
+            return
+
+        rn = payload.round_number
+        state = self._round_states.get(rn)
+        if state is None:
+            return
+
+        if rn > self._current_round:
+            self._advance_to(rn)
+
+        if state.nonce is None:
+            state.nonce = payload.nonce
+            state.nonce_event.set()
+            # Sign + rebroadcast so other peer also gets ours fast.
+            self._sign_and_broadcast(state)
+
+        sender_idx = self._member_keys.index(sender_key)
+        if sender_idx not in state.sig_cache:
+            state.sig_cache[sender_idx] = payload.signature
+        self._maybe_set_sigs_full(state)
 
     @lazy_wrapper(RoundResultPayload)
     def _on_round_result(self, peer: Peer, payload: RoundResultPayload) -> None:
-        self._cache_server(peer)
-        logger.info("[Round %d] RoundResult: success=%s completed=%d/3 msg='%s'",
+        if peer.public_key.key_to_bin() != self._server_pk:
+            logger.warning("RoundResult from non-server peer, dropped")
+            return
+
+        logger.info("[Round %d] RoundResult: success=%s completed=%d/3 msg=%r",
                     payload.round_number, payload.success,
                     payload.rounds_completed, payload.message)
-        state = self._round_states.get(payload.round_number)
-        if state and state.result_future and not state.result_future.done():
-            state.result_future.set_result(payload.success)
-        if payload.rounds_completed == 3:
-            self._all_done.set()
+
+        if payload.success and payload.round_number >= self._current_round:
+            self._has_won = True
+
+        next_rn = payload.rounds_completed + 1
+        if next_rn > self._current_round:
+            self._advance_to(next_rn)
 
     @lazy_wrapper(ReadyPayload)
     def _on_ready(self, peer: Peer, payload: ReadyPayload) -> None:
@@ -220,43 +284,8 @@ class Lab2Community(Community):
             return
 
         self._teammates_ready.add(sender_idx)
-        logger.info("Teammate %d is ready (%d/2).", sender_idx, len(self._teammates_ready))
+        logger.info("Teammate %d ready (%d/2)", sender_idx, len(self._teammates_ready))
         self._check_all_ready()
-
-    @lazy_wrapper(NonceBroadcastPayload)
-    def _on_nonce_broadcast(self, peer: Peer, payload: NonceBroadcastPayload) -> None:
-        sender_key = peer.public_key.key_to_bin()
-        if sender_key not in self._member_keys:
-            logger.warning("NonceBroadcast from unregistered peer, ignored.", payload)
-            return
-
-        rn = payload.round_number
-        sig = self.crypto.create_signature(self._signing_key, payload.nonce)
-        self.ez_send(peer, SignatureSharePayload(
-            group_id=self._group_id,
-            round_number=rn,
-            signature=sig,
-        ))
-        logger.info("[Round %d] NonceBroadcast received, and replied.", rn)
-
-    @lazy_wrapper(SignatureSharePayload)
-    def _on_signature_share(self, peer: Peer, payload: SignatureSharePayload) -> None:
-        sender_key = peer.public_key.key_to_bin()
-        if sender_key not in self._member_keys:
-            logger.warning("SignatureShare from unregistered peer, ignored.", payload)
-            return
-
-        rn = payload.round_number
-        sender_idx = self._member_keys.index(sender_key)
-        logger.info("[Round %d] SignatureShare from member %d.", rn, sender_idx)
-        state = self._round_states.get(rn)
-        if state is None:
-            logger.warning("[Round %d] SignatureShare for unknown round.", rn)
-            return
-
-        fut = state.sig_futures.get(sender_idx)
-        if fut and not fut.done():
-            fut.set_result(payload.signature)
 
     async def _discover_all_peers(self, timeout: float = 30.0) -> None:
         deadline = time.time() + timeout
@@ -285,13 +314,12 @@ class Lab2Community(Community):
         deadline = time.time() + timeout
         while not self._all_ready.is_set():
             if time.time() > deadline:
-                raise RuntimeError("Readiness handshake timed out after %.1f s" % timeout)
-
+                raise RuntimeError("readiness handshake timed out after %.1fs" % timeout)
             self._broadcast_ready()
             try:
                 await asyncio.wait_for(asyncio.shield(self._all_ready.wait()), timeout=0.2)
             except asyncio.TimeoutError:
-                pass  
+                pass
 
     def _broadcast_ready(self) -> None:
         payload = ReadyPayload(group_id=self._group_id)
@@ -302,38 +330,27 @@ class Lab2Community(Community):
     def _cache_server(self, peer: Peer) -> None:
         if self._server_peer is None:
             self._server_peer = peer
-            logger.info("Server peer cached: %s", peer.mid.hex())
+            logger.info("server peer cached: %s", peer.mid.hex())
             self._check_my_cache_ready()
 
     def _cache_teammate(self, peer: Peer, raw_key: bytes) -> None:
         idx = self._member_keys.index(raw_key)
         if idx not in self._teammate_peers:
             self._teammate_peers[idx] = peer
-            logger.info("Teammate %d cached: %s", idx, peer.mid.hex())
+            logger.info("teammate %d cached: %s", idx, peer.mid.hex())
             self._check_my_cache_ready()
 
     def _check_my_cache_ready(self) -> None:
-        if (not self._my_cache_ready and self._server_peer is not None and len(self._teammate_peers) == 2):
+        if (not self._my_cache_ready
+                and self._server_peer is not None
+                and len(self._teammate_peers) == 2):
             self._my_cache_ready = True
-            logger.info("Local peer cache full — announcing readiness to teammates.")
+            logger.info("local peer cache full — announcing readiness")
             self._check_all_ready()
 
     def _check_all_ready(self) -> None:
-        if (self._my_cache_ready and len(self._teammates_ready) == 2 and not self._all_ready.is_set()):
+        if (self._my_cache_ready
+                and len(self._teammates_ready) == 2
+                and not self._all_ready.is_set()):
             self._all_ready.set()
-            logger.info("All 3 members ready.")
-
-    def _teammate_indices(self) -> List[int]:
-        return [i for i in (0, 1, 2) if i != self._my_index]
-
-    def _broadcast_nonce(self, round_num: int, nonce: bytes) -> None:
-        payload = NonceBroadcastPayload(
-            group_id=self._group_id,
-            round_number=round_num,
-            nonce=nonce,
-        )
-
-        for peer in self._teammate_peers.values():
-            self.ez_send(peer, payload)
-
-        logger.debug("[Round %d] Broadcasted nonce to all peers")
+            logger.info("all 3 members ready")
