@@ -1,4 +1,6 @@
 from __future__ import annotations
+import os
+import sys
 import time
 import asyncio
 import logging
@@ -6,6 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, Optional, cast
 
+from dotenv import load_dotenv
 from ipv8.peer import Peer
 from ipv8.community import Community, CommunitySettings
 from ipv8.keyvault.keys import PrivateKey
@@ -60,11 +63,23 @@ class RoundState:
     sigs_full_event: asyncio.Event = field(default_factory=asyncio.Event)
     advance_event: asyncio.Event = field(default_factory=asyncio.Event)
 
+load_dotenv()
+def _require_env(key: str) -> str:
+    value = os.getenv(key)
+    if not value:
+        sys.exit(f"ERROR: environment variable {key!r} is not set in .env")
+    return value
+
 class Lab2Community(Community, PeerObserver):
     def __init__(self, settings: CommunitySettings) -> None:
         self.community_id = settings.community_id
         super().__init__(settings)
-
+        print(settings.community_id)
+        print(settings.group_id)
+        print(settings.my_index)
+        print(settings.member_keys)
+        print(settings.server_pk)
+        print(bytes.fromhex(_require_env("SERVER_PUBLIC_KEY_ASS2")))
         self._group_id = settings.group_id
         self._my_index = settings.my_index
         self._member_keys = settings.member_keys
@@ -286,27 +301,34 @@ class Lab2Community(Community, PeerObserver):
         logger.info("Teammate %d ready (%d/2)", sender_idx, len(self._teammates_ready))
         self._check_all_ready()
 
-    async def _discover_all_peers(self, timeout: float = 60.0) -> None:
+    async def _discover_all_peers(self, timeout: float = 900.0) -> None:
         deadline = time.time() + timeout
         while not self._my_cache_ready:
             if time.time() > deadline:
                 raise RuntimeError("Could not discover all peers within %.1f s" % timeout)
-
+            peers = self.get_peers()
+            print(len(peers))
             # Search through all peers
-            for peer in self.get_peers():
+            for peer in peers:
                 if self._server_peer is None:
-                    if peer.public_key.key_to_bin() == self._server_pk:
-                        self._cache_server(peer)
-                        break
+                    try:
+                        if peer.public_key.key_to_bin() == self._server_pk:
+                            self._cache_server(peer)
+                            break
+                    except Exception:
+                        continue
 
                 if len(self._teammate_peers) < 2:
-                    key = peer.public_key.key_to_bin()
-                    if key in self._member_keys and key != self._member_keys[self._my_index]:
-                        idx = self._member_keys.index(key)
-                        if idx not in self._teammate_peers:
-                            self._cache_teammate(peer, key)
+                    try:
+                        key = peer.public_key.key_to_bin()
+                        if key in self._member_keys and key != self._member_keys[self._my_index]:
+                            idx = self._member_keys.index(key)
+                            if idx not in self._teammate_peers:
+                                self._cache_teammate(peer, key)
+                    except Exception:
+                        continue
 
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(5)
 
     async def _readiness_handshake(self, timeout: float = 30.0) -> None:
         deadline = time.time() + timeout

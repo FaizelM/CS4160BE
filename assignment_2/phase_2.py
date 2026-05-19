@@ -14,7 +14,7 @@ from ipv8_service import IPv8
 from ipv8.util import run_forever
 
 
-KEY_FILE  = Path("assignment_1", "key.pem")
+KEY_FILE  = Path("mykey.pem")
 GROUP_ID  = "5c0303d6e952c77d"
  
 MEMBER_KEYS: List[bytes] = [  # Faizel, Daniel, Ruben
@@ -32,7 +32,7 @@ def _require_env(key: str) -> str:
 
 COMMUNITY_ID      = bytes.fromhex(_require_env("COMMUNITY_ID_ASS2"))
 SERVER_PUBLIC_KEY = bytes.fromhex(_require_env("SERVER_PUBLIC_KEY_ASS2"))
-MY_INDEX = _require_env("MY_INDEX")
+MY_INDEX = int(_require_env("MY_INDEX"))
  
 async def _run() -> None:
     config = (
@@ -43,10 +43,8 @@ async def _run() -> None:
         .add_overlay(
             "Lab2Community",
             "my_peer",
-            [WalkerDefinition(Strategy.RandomWalk, 20, {"timeout": 3.0})],
-            default_bootstrap_defs + [
-                BootstrapperDefinition(Bootstrapper.UDPBroadcastBootstrapper, {})
-            ],
+            [WalkerDefinition(Strategy.RandomWalk, 20, {"timeout": 5.0})],
+            default_bootstrap_defs,
             {
                 "community_id": COMMUNITY_ID,
                 "group_id": GROUP_ID,
@@ -55,6 +53,7 @@ async def _run() -> None:
                 "server_pk": SERVER_PUBLIC_KEY
             }, 
             [("run_all_rounds",)],
+            -1
         )
         .finalize()
     )
