@@ -97,8 +97,8 @@ class ChallengeInternalNonceDist(VariablePayload):
 @vp_compile
 class ChallengeInternalResponse(VariablePayload):
     msg_id = 97
-    format_list = ["varlenHutf8", "varlenH", "q"]
-    names = ["group_id", "sig", "round_nr"]
+    format_list = ["varlenHutf8", "varlenH", "q", "q"]
+    names = ["group_id", "sig", "round_nr", "idx"]
 
 @vp_compile
 class InternalStartNextRoundNotice(VariablePayload):
@@ -240,11 +240,13 @@ class Lab2Community(Community, PeerObserver):
     @lazy_wrapper(ChallengeInternalResponse)
     def _on_internal_sig_response(self, peer: Peer, payload: ChallengeInternalResponse) -> None:
         print(f"RECEIVED SIGNED NOCE BACK FROM PEER: {peer},\npayload: {payload}")
-        
+
+        self._signed_nonces[payload.idx] = payload.sig      
         if len(self._signed_nonces) == 3:
             print("RECEIVED ALL NONCES, SENDING TO SERVER")
             assert self.server_peer, "SERVER PEER WAS NONE"
             self.ez_send(self.server_peer, BundleSubmission(self._group_id, self._my_index, self._signed_nonces[0], self._signed_nonces[1], self._signed_nonces[2]))
+            print("Send back singed nonce")
         else:
             print(f"DIDNT RECEIVE ALL SIGNED NONCE YET. CURRENTLY KNOW: {self._signed_nonces.keys()}")
 
@@ -253,7 +255,7 @@ class Lab2Community(Community, PeerObserver):
         print(f"RECEIVED NONCE FROM PEER: {peer},\npayload: {payload}")
         assert self._sk, "PRIVATE KEY WAS NONE"
         signed_nonce = self.crypto.create_signature(self._sk, payload.nonce)
-        self.ez_send(peer, ChallengeInternalResponse(self._group_id, signed_nonce, payload.round_nr))
+        self.ez_send(peer, ChallengeInternalResponse(self._group_id, signed_nonce, payload.round_nr, self._my_index))
 
     @lazy_wrapper(RoundResult)
     def _on_round_result(self, peer: Peer, payload: RoundResult) -> None:
