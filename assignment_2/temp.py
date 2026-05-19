@@ -147,8 +147,7 @@ class Lab2Community(Community, PeerObserver):
         print(f"my idx: {self._my_index}")
         self.network.add_peer_observer(self)
         self._nr_to_peer[self._my_index] = self.my_peer
-        self.teammates_ready[self.my_peer] = self._my_index
-        self.sk: PrivateKey = cast(PrivateKey, self.my_peer.key) 
+        self._sk: PrivateKey = cast(PrivateKey, self.my_peer.key) 
 
     def on_peer_removed(self, peer: Peer) -> None:
         peer_pk = peer.public_key.key_to_bin().hex()
@@ -175,6 +174,7 @@ class Lab2Community(Community, PeerObserver):
         
         if self.server_peer and len(self._nr_to_peer.keys()) == 3 and self._group_id:
             self.all_present = True
+            self.teammates_ready[self.my_peer] = self._my_index
             print(f"FOUND EVERYONE, and group id: {self._group_id}, continuing to protocol")
             self._broadcast_ready()
 
@@ -185,16 +185,11 @@ class Lab2Community(Community, PeerObserver):
             print(f"ReadyPayload from unregistered peer {peer},\n", payload)
             return
         
-        if payload.group_id != self._group_id:
-            print("ReadyPayload group id mismatch.", payload)
-            return
-
         if peer in self.teammates_ready.keys():
-            print(f"ReadyPayload from mebmer already ready: {payload}")
             return
 
         self.teammates_ready[peer] = self._member_to_nr[sender_key]
-        print("Teammate %d ready (%d/2)", self.teammates_ready[peer], len(self.teammates_ready.keys()))
+        print(f"Teammate {self.teammates_ready[peer]} ready ({len(self.teammates_ready)}/3)")
 
         if len(self.teammates_ready.keys()) == 3:
             print("EVERYONE READY, nr 1 will start challenge")
@@ -217,7 +212,7 @@ class Lab2Community(Community, PeerObserver):
         for peer in self._nr_to_peer.values():
             self.ez_send(peer, payload)
 
-        print("ReadyPayload broadcast to %d teammate(s). teammates: ", len(self.teammates_ready.keys()), self.teammates_ready.values())
+        print(f"ReadyPayload broadcast to {len(self.teammates_ready.keys())} teammate(s). teammates: ", self.teammates_ready.values())
     
     def _start_challenge_rounds(self):
         print(f"Sending Challenge of round: {self._my_index} to server")
