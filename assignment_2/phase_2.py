@@ -14,7 +14,7 @@ from ipv8_service import IPv8
 from ipv8.util import run_forever
 
 
-KEY_FILE  = Path("mykey.pem")
+KEY_FILE  = Path("assignment_1", "key.pem")
 GROUP_ID  = "5c0303d6e952c77d"
  
 MEMBER_KEYS: List[bytes] = [  # Faizel, Daniel, Ruben

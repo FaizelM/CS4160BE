@@ -40,6 +40,18 @@ MEMBER_TO_NR = {
 }
 
 @vp_compile
+class RegisterPayload(VariablePayload):
+    msg_id = 1
+    format_list = ["varlenH", "varlenH", "varlenH"]
+    names = ["member1_key", "member2_key", "member3_key"]
+
+@vp_compile
+class ResponsePayload(VariablePayload):
+    msg_id = 2
+    format_list = ["?", "varlenHutf8", "varlenHutf8"]
+    names = ["success", "group_id", "message"]
+
+@vp_compile
 class ChallengeRequest(VariablePayload):
     msg_id=3
     format_list = ["varlenHutf8"]
@@ -126,7 +138,7 @@ class Lab2Community(Community, PeerObserver):
         print(f"My key end: {self.my_peer.public_key.key_to_bin().hex()[-20:]}")
         print(f"my idx: {self._my_index}")
         self.network.add_peer_observer(self)
-        self._nr_to_peer[self._my_index] = self._nr_to_member[self._my_index]
+        self._nr_to_peer[self._my_index] = self.my_peer
         self.teammates_ready[self.my_peer] = self._my_index
 
     def on_peer_removed(self, peer: Peer) -> None:
@@ -166,7 +178,7 @@ class Lab2Community(Community, PeerObserver):
             print("ReadyPayload group id mismatch.", payload)
             return
 
-        if self.teammates_ready[peer] != None:
+        if peer in self.teammates_ready.keys():
             print(f"ReadyPayload from mebmer already ready: {payload}")
             return
 
@@ -176,16 +188,27 @@ class Lab2Community(Community, PeerObserver):
         if len(self.teammates_ready.keys()) == 3:
             print("EVERYONE READY, nr 1 will start challenge")
             if self._my_index == 0:
-                print("I WILL START CHALLENGING THE SERVER")
-                self._start_challenge_rounds()
+                print("I WILL REGISTER TO THE SERVER")
+                assert self.server_peer, "PEER SERVER WAS NONE"
+                self.ez_send(self.server_peer, RegisterPayload(self._nr_to_member[0], self._nr_to_member[1], self._nr_to_member[2]))
+
+
+    @lazy_wrapper(ResponsePayload)
+    def _on_response_payload(self, peer: Peer, payload: ResponsePayload) -> None:
+        print(f"RECEIVED REGISTRATION RESPONSE FROM THE SERVER: {peer},\npayload: {payload}")
+        if payload.success:
+            print("I WILL START CHALLENGING THE SERVER")
+            self._start_challenge_rounds()
+        else:
+            print("REGISTRATION FAILED")
 
 
     def _broadcast_ready(self) -> None:
         payload = ReadyPayload(group_id=self._group_id)
-        for peer in self.teammates_ready.keys():
+        for peer in self._nr_to_peer.values():
             self.ez_send(peer, payload)
 
-        logger.debug("ReadyPayload broadcast to %d teammate(s).", len(self.teammates_ready.keys()))
+        logger.debug("ReadyPayload broadcast to %d teammate(s). teammates: ", len(self.teammates_ready.keys()), self.teammates_ready.values())
     
     def _start_challenge_rounds(self):
         print(f"Sending Challenge of round: {self._my_index} to server")
