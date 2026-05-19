@@ -9,8 +9,6 @@ from dotenv import load_dotenv
 
 from phase_2_community import Lab2Community
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
 from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, BootstrapperDefinition, Bootstrapper, default_bootstrap_defs
 from ipv8_service import IPv8
 from ipv8.util import run_forever
@@ -19,7 +17,6 @@ from ipv8.util import run_forever
 KEY_FILE  = Path("assignment_1", "key.pem")
 GROUP_ID  = "5c0303d6e952c77d"
  
-MY_INDEX  = 0 # own position in the list below (0, 1, or 2)
 MEMBER_KEYS: List[bytes] = [  # Faizel, Daniel, Ruben
     b'LibNaCLPK:*Q\xc3\xf7\xaa\x87]#NS\x0cL\xa8\xba\xe4pb\xaf\x82\xdd\x1bE\xb2&\xf8\xfc\x81e\xce\xbc\x91\n8\xfcJ\x92\xd5\xccq\xc0\xdf\xd8\x85\xebr\xa1\x06,ve\xe9yQN\xeewe\x9b\x84\xaeLd\xf6V', 
     b'LibNaCLPK:\xee\xe1\xefN\xf0\xb0&\xf4\xb7]#\x10\x9e\x16\x87\xbb\x86%%\xdeG"\xd2\x86\xb2\xb5\xf7:\x04\xee\x078n\xd8\xf8)\xbd\xbb8\x13;\xb5\xd0D\xa0\x95\x94\xb97\xdd>&\x8a\rf\x8f >\xdf\xd4.c\x0c\xa6', 
@@ -35,6 +32,7 @@ def _require_env(key: str) -> str:
 
 COMMUNITY_ID      = bytes.fromhex(_require_env("COMMUNITY_ID_ASS2"))
 SERVER_PUBLIC_KEY = bytes.fromhex(_require_env("SERVER_PUBLIC_KEY_ASS2"))
+MY_INDEX = _require_env("MY_INDEX")
  
 async def _run() -> None:
     config = (

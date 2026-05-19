@@ -4,14 +4,15 @@ import asyncio
 import logging
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, cast
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from typing import Dict, Optional, cast
 
 from ipv8.peer import Peer
 from ipv8.community import Community, CommunitySettings
 from ipv8.keyvault.keys import PrivateKey
 from ipv8.lazy_community import lazy_wrapper
 from ipv8.messaging.payload_dataclass import DataClassPayload
+from ipv8.configuration import ConfigBuilder
+from ipv8.peerdiscovery.network import PeerObserver
 
 logger = logging.getLogger("Lab2")
 
@@ -59,16 +60,8 @@ class RoundState:
     sigs_full_event: asyncio.Event = field(default_factory=asyncio.Event)
     advance_event: asyncio.Event = field(default_factory=asyncio.Event)
 
-
-@dataclass
-class Lab2Settings(CommunitySettings):
-    private_key: Optional[Ed25519PrivateKey] = None
-    group_id: str = ""
-    member_keys: List[bytes] = field(default_factory=list)
-    my_index: int = 0
-
 class Lab2Community(Community):
-    def __init__(self, settings: Lab2Settings) -> None:
+    def __init__(self, settings: CommunitySettings, PeerObserver) -> None:
         self.community_id = settings.community_id
         super().__init__(settings)
 
@@ -287,7 +280,7 @@ class Lab2Community(Community):
         logger.info("Teammate %d ready (%d/2)", sender_idx, len(self._teammates_ready))
         self._check_all_ready()
 
-    async def _discover_all_peers(self, timeout: float = 30.0) -> None:
+    async def _discover_all_peers(self, timeout: float = 60.0) -> None:
         deadline = time.time() + timeout
         while not self._my_cache_ready:
             if time.time() > deadline:
@@ -300,13 +293,12 @@ class Lab2Community(Community):
                         self._cache_server(peer)
                         break
 
-                elif len(self._teammate_peers) < 2:
-                    for peer in self.get_peers():
-                        key = peer.public_key.key_to_bin()
-                        if key in self._member_keys and key != self._member_keys[self._my_index]:
-                            idx = self._member_keys.index(key)
-                            if idx not in self._teammate_peers:
-                                self._cache_teammate(peer, key)
+                if len(self._teammate_peers) < 2:
+                    key = peer.public_key.key_to_bin()
+                    if key in self._member_keys and key != self._member_keys[self._my_index]:
+                        idx = self._member_keys.index(key)
+                        if idx not in self._teammate_peers:
+                            self._cache_teammate(peer, key)
 
             await asyncio.sleep(0.1)
 
