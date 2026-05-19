@@ -125,6 +125,9 @@ class Lab2Community(Community, PeerObserver):
     def on_peer_removed(self, peer: Peer) -> None:
         return None
 
+    def start_rounds(self) -> None:
+        asyncio.ensure_future(self.run_all_rounds())
+
     async def run_all_rounds(self) -> None:
         logger.info("Discovering server + teammates")
         await self._discover_all_peers()

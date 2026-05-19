@@ -52,7 +52,7 @@ async def _run() -> None:
                 "my_index": MY_INDEX,
                 "server_pk": SERVER_PUBLIC_KEY
             }, 
-            [("run_all_rounds",)],
+            [("start_rounds",)],
             -1
         )
         .finalize()
