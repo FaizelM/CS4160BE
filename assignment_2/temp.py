@@ -12,6 +12,8 @@ from ipv8.messaging.lazy_payload import VariablePayload, vp_compile
 from ipv8.peer import Peer
 from ipv8_service import IPv8
 
+from assignment_2.phase_2_community import ChallengeRequestPayload, ChallengeResponsePayload
+
 class _UnsupportedCurveFilter(logging.Filter):
     """Suppress the stream of 'Curve X is not supported' errors from old peers."""
     def filter(self, record: logging.LogRecord) -> bool:
@@ -70,6 +72,24 @@ class ReadyPayload(VariablePayload):
     format_list = ["varlenHutf8"]
     names = ["group_id"]
 
+@vp_compile
+class ChallengeInternalNonceDist(VariablePayload):
+    msg_id = 98
+    format_list = ["varlenHutf8", "varlenH", "q"]
+    names = ["group_id", "nonce", "round_nr"]
+
+@vp_compile
+class ChallengeInternalResponse(VariablePayload):
+    msg_id = 97
+    format_list = ["varlenHutf8", "varlenH", "q"]
+    names = ["group_id", "sig", "round_nr"]
+
+@vp_compile
+class InternalStartNextRoundNotice(VariablePayload):
+    msg_id = 96
+    format_list = ["varlenHutf8", "q"]
+    names = ["group_id", "new_round_nr"]
+
 
 class Lab2Community(Community, PeerObserver):
     community_id = bytes.fromhex(COMMUNITY_ID_HEX)
@@ -84,16 +104,23 @@ class Lab2Community(Community, PeerObserver):
         self._server_pk = settings.server_pk
         self._sk = None
 
+        # discovery
         self.server_peer = None
         self._nr_to_peer = {}
         self.all_present = False
         
+        # ready handshake
         self.teammates_ready = {}
         self.all_ready = False
 
-        # self.add_message_handler(ChallangeRequest, self._on_challenge_response)
-        # self.add_message_handler(ChallangeResponse, self._on_round_result)
+        # my round
+        self._signed_nonces = {}
+
+        # handlers
         self.add_message_handler(ReadyPayload, self._on_ready)
+        self.add_message_handler(ChallangeRequest, self._on_challenge_response)
+        self.add_message_handler(ChallengeInternalResponse, self._on_internal_sig_response)
+        self.add_message_handler(RoundResult, self._on_round_result)
     
     def started(self):
         print("-- STARTED COMMUNITY --")
@@ -134,7 +161,7 @@ class Lab2Community(Community, PeerObserver):
     def _on_ready(self, peer: Peer, payload: ReadyPayload) -> None:
         sender_key = peer.public_key.key_to_bin().hex()
         if sender_key not in self._member_to_nr.keys():
-            print("ReadyPayload from unregistered peer, ignored.", payload)
+            print(f"ReadyPayload from unregistered peer {peer},\n", payload)
             return
         
         if payload.group_id != self._group_id:
@@ -149,14 +176,80 @@ class Lab2Community(Community, PeerObserver):
         print("Teammate %d ready (%d/2)", self.teammates_ready[peer], len(self.teammates_ready.keys()))
 
         if len(self.teammates_ready.keys()) == 3:
-            print("EVERYONE READY")
+            print("EVERYONE READY, nr 1 will start challenge")
+            if self._my_index == 0:
+                print("I WILL START CHALLENGING THE SERVER")
+                self._start_challenge_rounds()
+
 
     def _broadcast_ready(self) -> None:
         payload = ReadyPayload(group_id=self._group_id)
-        for peer in self.teammates_ready.values():
+        for peer in self.teammates_ready.keys():
             self.ez_send(peer, payload)
 
         logger.debug("ReadyPayload broadcast to %d teammate(s).", len(self.teammates_ready.keys()))
+    
+    def _start_challenge_rounds(self):
+        print(f"Sending Challenge of round: {self._my_index} to server")
+        assert self.server_peer, "self.server_peer was NONE"
+        self.ez_send(self.server_peer, ChallengeRequestPayload(self._group_id))
+
+    @lazy_wrapper(ChallengeResponsePayload)
+    def _on_challenge_response(self, peer: Peer, payload: ChallengeResponsePayload) -> None:
+        if not peer is self.server_peer:
+            print(f"GOT CHALLENGE RESPONSE FROM NON SERVER.\npeer: {peer},\npayload:{payload}\n")
+            return
+        
+        nonce = payload.nonce
+        for nr, peer in self._nr_to_peer:
+            if nr == self._my_index:
+                continue
+            
+            self.ez_send(peer, ChallengeInternalNonceDist(self._group_id, nonce, self._my_index))
+
+        assert self._sk, "OWN SECRET KEY WAS NONE"
+        self._signed_nonces[self._my_index] = self.crypto.create_signature(self._sk, nonce)
+        
+    @lazy_wrapper(ChallengeInternalResponse)
+    def _on_internal_sig_response(self, peer: Peer, payload: ChallengeInternalResponse) -> None:
+        print(f"RECEIVED SIGNED NOCE BACK FROM PEER: {peer},\npayload: {payload}")
+        
+        if len(self._signed_nonces) == 3:
+            print("RECEIVED ALL NONCES, SENDING TO SERVER")
+            assert self.server_peer, "SERVER PEER WAS NONE"
+            self.ez_send(self.server_peer, BundleSubmission(self._group_id, self._my_index, self._signed_nonces[0], self._signed_nonces[1], self._signed_nonces[2]))
+        else:
+            print(f"DIDNT RECEIVE ALL SIGNED NONCE YET. CURRENTLY KNOW: {self._signed_nonces.keys()}")
+
+    @lazy_wrapper(ChallengeInternalNonceDist)
+    def _on_internal_nonce_dist(self, peer: Peer, payload: ChallengeInternalNonceDist) -> None:
+        print(f"RECEIVED NONCE FROM PEER: {peer},\npayload: {payload}")
+        assert self._sk, "PRIVATE KEY WAS NONE"
+        signed_nonce = self.crypto.create_signature(self._sk, payload.nonce)
+        self.ez_send(peer, ChallengeInternalResponse(self._group_id, signed_nonce, payload.round_nr))
+
+    @lazy_wrapper(RoundResult)
+    def _on_round_result(self, peer: Peer, payload: RoundResult) -> None:
+        print(f"RECEIVED ROUND RESPONSE FORM SERVER: {peer},\npayload: {payload}")
+
+        if payload.success:
+            if self._my_index < 2:
+                print("LETTING NEXT NOTE KNOW TO START NEW ROUND")
+                self.ez_send(self._nr_to_peer[self._my_index+1], InternalStartNextRoundNotice(self._group_id, self._my_index+1))
+                return
+            if self._my_index == 2:
+                print("THIS WAS LAST ROUND")
+                return
+        else:
+            print("ABORTING ROUND FAILED")
+
+    @lazy_wrapper(InternalStartNextRoundNotice)
+    def _on_next_round_notice(self, peer: Peer, payload: InternalStartNextRoundNotice) -> None:
+        print(f"RECEIVED NEXT ROUND MSG FROM PEER: {peer},\npayload: {payload}")
+        if payload.next_round_nr == self._my_index:
+            self._start_challenge_rounds()
+            
+        
         
         
 def is_server(peer: Peer):
