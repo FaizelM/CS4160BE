@@ -113,7 +113,7 @@ class Lab2Community(Community, PeerObserver):
     def __init__(self, settings):
         super().__init__(settings)
 
-        self._group_id = None
+        self._group_id = "b54c463cf3ba5295" 
         self._my_index = settings.my_index
         self._member_to_nr= settings.member_to_nr
         self._nr_to_member = settings.nr_to_member
@@ -167,7 +167,7 @@ class Lab2Community(Community, PeerObserver):
             print("SERVER FOUND\n")
             self.server_peer = peer
             print("REGISTERING GROUP")
-            self.ez_send(self.server_peer, RegisterPayload(PUBLIC_KEYS[0], PUBLIC_KEYS[1], PUBLIC_KEYS[2]))
+            # self.ez_send(self.server_peer, RegisterPayload(PUBLIC_KEYS[0], PUBLIC_KEYS[1], PUBLIC_KEYS[2]))
         
         if peer_pk in self._member_to_nr.keys():
             nr = self._member_to_nr[peer_pk]
@@ -245,7 +245,7 @@ class Lab2Community(Community, PeerObserver):
         if len(self._signed_nonces) == 3:
             print("RECEIVED ALL NONCES, SENDING TO SERVER")
             assert self.server_peer, "SERVER PEER WAS NONE"
-            self.ez_send(self.server_peer, BundleSubmission(self._group_id, self._my_index, self._signed_nonces[0], self._signed_nonces[1], self._signed_nonces[2]))
+            self.ez_send(self.server_peer, BundleSubmission(self._group_id, self._my_index + 1, self._signed_nonces[0], self._signed_nonces[1], self._signed_nonces[2]))
             print("Send back singed nonce")
         else:
             print(f"DIDNT RECEIVE ALL SIGNED NONCE YET. CURRENTLY KNOW: {self._signed_nonces.keys()}")
@@ -256,6 +256,7 @@ class Lab2Community(Community, PeerObserver):
         assert self._sk, "PRIVATE KEY WAS NONE"
         signed_nonce = self.crypto.create_signature(self._sk, payload.nonce)
         self.ez_send(peer, ChallengeInternalResponse(self._group_id, signed_nonce, payload.round_nr, self._my_index))
+        print("responsed")
 
     @lazy_wrapper(RoundResult)
     def _on_round_result(self, peer: Peer, payload: RoundResult) -> None:
@@ -275,7 +276,7 @@ class Lab2Community(Community, PeerObserver):
     @lazy_wrapper(InternalStartNextRoundNotice)
     def _on_next_round_notice(self, peer: Peer, payload: InternalStartNextRoundNotice) -> None:
         print(f"RECEIVED NEXT ROUND MSG FROM PEER: {peer},\npayload: {payload}")
-        if payload.next_round_nr == self._my_index:
+        if payload.new_round_nr == self._my_index:
             self._start_challenge_rounds()
             
         
